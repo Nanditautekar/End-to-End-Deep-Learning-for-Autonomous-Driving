@@ -19,7 +19,7 @@ def get_requirements(file_path: str) -> List[str]:
 
 
 setup(
-    name="End_to_End_Deep_Learning_for_Autonomous_Driving",
+    name="End-to-End-Deep-Learning-for-Autonomous-Driving",
     version="0.0.1",
     author="nandita",
     author_email="2023dc04333@wilp.bits-pilani.ac.in",
