@@ -208,3 +208,21 @@ __marimo__/
 
 #vs file
 *.vs/
+
+# datasets
+data/
+dataset/
+datasets/
+
+# kaggle credentials
+.kaggle/
+kaggle.json
+
+# large files
+*.zip
+*.csv
+*.parquet
+
+# artifacts
+artifacts/
+logs/
