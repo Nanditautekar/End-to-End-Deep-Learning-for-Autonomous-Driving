@@ -1,4 +1,11 @@
 numpy
 pandas
 matplotlib
+opencv-contrib-python
+tensorflow
+scikit-learn
+keras
+flask
+python-socketio
+eventlet
 #-e .
