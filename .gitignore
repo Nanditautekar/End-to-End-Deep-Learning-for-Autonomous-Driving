@@ -221,6 +221,7 @@ kaggle.json
 # large files
 *.zip
 *.csv
+*.json
 *.parquet
 
 # artifacts
