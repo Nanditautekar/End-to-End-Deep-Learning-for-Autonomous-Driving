@@ -1,169 +1,202 @@
 import os
 import sys
-import csv
+import json
 import pandas as pd
 from datasets import load_dataset
 from PIL import Image
+import numpy as np
 
 from src.Project.logger import logging
 from src.Project.exception import CustomException
 
+# CONFIG
 
-DATASET_NAME = "immanuelpeter/carla-autopilot-images"
+DATASET_NAME = "immanuelpeter/carla-autopilot-multimodal-dataset"
+SPLIT = "train"
 
-SAVE_DIR = "data/hf_data/train"
-IMG_DIR = os.path.join(SAVE_DIR, "images")
-CSV_PATH = os.path.join(SAVE_DIR, "labels.csv")
-CKPT_PATH = os.path.join(SAVE_DIR, "checkpoint.txt")
+OUTPUT_DIR = "data/hf_data"
+IMAGE_DIR = os.path.join(OUTPUT_DIR, "images")
 
-COLUMNS = [
-    "image_front",
-    "image_front_left",
-    "image_front_right",
-    "speed_kmh",
-    "throttle",
-    "steer",
-    "brake",
-]
+CSV_PATH = os.path.join(OUTPUT_DIR, "metadata.csv")
+JSON_PATH = os.path.join(OUTPUT_DIR, "dataset.json")
+CKPT_PATH = os.path.join(OUTPUT_DIR, "checkpoint.txt")
 
 MAX_SAMPLES = 10000
+FLUSH_EVERY = 200
 
+os.makedirs(IMAGE_DIR, exist_ok=True)
 
-def save_image(img, path):
+# Utils
+
+def save_image(img_obj, filename):
+    if img_obj is None:
+        return None
     try:
-        if not isinstance(img, Image.Image):
-            logging.warning(f"Invalid image object at {path}")
-            return False
+        if isinstance(img_obj, Image.Image):
+            img = img_obj
+        else:
+            img = Image.fromarray(np.array(img_obj))
 
-        if img.mode == "RGBA":
+        if img.mode != "RGB":
             img = img.convert("RGB")
 
-        img.save(path, format="JPEG", quality=95)
-        return True
+        path = os.path.join(IMAGE_DIR, filename)
+        img.save(path)
+        return path
 
     except Exception as e:
-        logging.error(f"Failed to save image {path}: {e}")
-        return False
-
-
-def get_existing_count():
-    try:
-        if not os.path.exists(CSV_PATH):
-            return 0
-        df = pd.read_csv(CSV_PATH)
-        return len(df)
-
-    except Exception as e:
-        raise CustomException(e, sys)
+        logging.error(f"Image save failed: {filename} → {e}")
+        return None
 
 
 def get_checkpoint():
-    try:
-        if not os.path.exists(CKPT_PATH):
-            return 0
-        with open(CKPT_PATH, "r") as f:
-            return int(f.read().strip())
-
-    except Exception as e:
-        raise CustomException(e, sys)
+    if not os.path.exists(CKPT_PATH):
+        return 0
+    with open(CKPT_PATH, "r") as f:
+        return int(f.read().strip())
 
 
-def save_checkpoint(raw_index):
-    try:
-        with open(CKPT_PATH, "w") as f:
-            f.write(str(raw_index))
+def save_checkpoint(idx):
+    with open(CKPT_PATH, "w") as f:
+        f.write(str(idx))
 
-    except Exception as e:
-        raise CustomException(e, sys)
 
+def load_existing_json():
+    if not os.path.exists(JSON_PATH):
+        return []
+    with open(JSON_PATH, "r") as f:
+        return json.load(f)
+
+
+def append_json(records):
+    existing = load_existing_json()
+    existing.extend(records)
+    with open(JSON_PATH, "w") as f:
+        json.dump(existing, f, indent=2)
+
+
+def append_csv(rows):
+    write_header = not os.path.exists(CSV_PATH)
+    df = pd.DataFrame(rows)
+    df.to_csv(CSV_PATH, mode="a", header=write_header, index=False)
+
+# Main
 
 def main():
     try:
-        os.makedirs(IMG_DIR, exist_ok=True)
+        logging.info("Loading dataset in streaming mode...")
+        dataset = load_dataset(DATASET_NAME, split=SPLIT, streaming=True)
 
-        logging.info("Starting HuggingFace dataset ingestion")
-
-        dataset = load_dataset(
-            DATASET_NAME,
-            split="train",
-            streaming=True
-        )
-
-        start_saved = get_existing_count()
         start_raw = get_checkpoint()
+        logging.info(f"Resuming from raw index {start_raw}")
 
-        logging.info(f"Resuming download")
-        logging.info(f"Saved samples so far: {start_saved}")
-        logging.info(f"Raw stream index: {start_raw}")
+        json_buffer = []
+        csv_buffer = []
 
-        rows = []
-        saved = start_saved
+        saved = len(load_existing_json())
 
         for raw_idx, sample in enumerate(dataset):
 
-            # Skip raw rows until checkpoint
             if raw_idx < start_raw:
                 continue
 
-            # Skip invalid rows
-            if any(sample[k] is None for k in COLUMNS):
+            # Minimal safe requirements 
+            if sample.get("image_front_right") is None:
                 continue
 
-            front_path = os.path.join(IMG_DIR, f"{saved}_front.jpg")
-            left_path  = os.path.join(IMG_DIR, f"{saved}_left.jpg")
-            right_path = os.path.join(IMG_DIR, f"{saved}_right.jpg")
+            # Save images 
+            front_right_path = save_image(
+                sample.get("image_front_right"),
+                f"{saved}_front_right.png"
+            )
 
-            ok1 = save_image(sample["image_front"], front_path)
-            ok2 = save_image(sample["image_front_left"], left_path)
-            ok3 = save_image(sample["image_front_right"], right_path)
+            seg_front_path = save_image(
+                sample.get("seg_front"),
+                f"{saved}_seg_front.png"
+            )
 
-            if not (ok1 and ok2 and ok3):
-                logging.warning(f"Skipping sample {saved} due to image save failure")
+            front_path = save_image(
+                sample.get("image_front"),
+                f"{saved}_front.png"
+            )
+
+            left_path = save_image(
+                sample.get("image_front_left"),
+                f"{saved}_left.png"
+            )
+
+            if not front_right_path:
                 continue
 
-            rows.append({
-                "front_img": front_path,
-                "left_img": left_path,
-                "right_img": right_path,
-                "speed_kmh": sample["speed_kmh"],
-                "throttle": sample["throttle"],
-                "steer": sample["steer"],
-                "brake": sample["brake"],
+            # JSON record 
+            record = {
+                "image_front_right": front_right_path,
+                "image_front": front_path,
+                "image_front_left": left_path,
+                "seg_front": seg_front_path,
+                "boxes": sample.get("boxes"),
+                "box_labels": sample.get("box_labels"),
+                "velocity_x": sample.get("velocity_x"),
+                "velocity_y": sample.get("velocity_y"),
+                "velocity_z": sample.get("velocity_z"),
+                "speed_kmh": sample.get("speed_kmh"),
+                "throttle": sample.get("throttle"),
+                "steer": sample.get("steer"),
+                "brake": sample.get("brake"),
+            }
+
+            json_buffer.append(record)
+
+            # CSV
+            csv_buffer.append({
+                "image_front_right": front_right_path,
+                "image_front": front_path,
+                "image_front_left": left_path,
+                "seg_front": seg_front_path,
+                "velocity_x": record["velocity_x"],
+                "velocity_y": record["velocity_y"],
+                "velocity_z": record["velocity_z"],
+                "speed_kmh": record["speed_kmh"],
+                "throttle": record["throttle"],
+                "steer": record["steer"],
+                "brake": record["brake"],
             })
 
             saved += 1
             save_checkpoint(raw_idx + 1)
 
+            # Progress
             if saved % 100 == 0:
-                logging.info(f"Downloaded {saved} samples")
+                print(f"{saved} samples completed")
+                logging.info(f"{saved} samples completed")
+
+            # Flush 
+            if len(json_buffer) >= FLUSH_EVERY:
+                append_json(json_buffer)
+                append_csv(csv_buffer)
+                json_buffer.clear()
+                csv_buffer.clear()
+                logging.info(f"Flushed {FLUSH_EVERY} samples to disk")
 
             if saved >= MAX_SAMPLES:
-                logging.info("Reached MAX_SAMPLES limit")
                 break
 
-        if rows:
-            write_header = not os.path.exists(CSV_PATH)
+        # Final flush
+        if json_buffer:
+            append_json(json_buffer)
+            append_csv(csv_buffer)
 
-            with open(CSV_PATH, "a", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=rows[0].keys())
-                if write_header:
-                    writer.writeheader()
-                writer.writerows(rows)
-
-            logging.info(f"Appended {len(rows)} rows to CSV")
-
-        logging.info(f"Download completed. Total samples: {saved}")
-        logging.info(f"Images directory: {IMG_DIR}")
-        logging.info(f"CSV path: {CSV_PATH}")
-        logging.info(f"Checkpoint path: {CKPT_PATH}")
-
-        print(f"\n✅ Now have {saved} total samples")
-        print(f"Images → {IMG_DIR}")
-        print(f"CSV → {CSV_PATH}")
-        print(f"Checkpoint → {CKPT_PATH}")
+        logging.info(f"Done. Total samples: {saved}")
+        print("=====================================")
+        print("Download complete!")
+        print(f"Images saved to: {IMAGE_DIR}")
+        print(f"Single JSON:     {JSON_PATH}")
+        print(f"Metadata CSV:   {CSV_PATH}")
+        print(f"Total rows:     {saved}")
+        print("=====================================")
 
     except Exception as e:
-        logging.error("Fatal error in HF data ingestion", exc_info=True)
+        logging.error("Fatal ingestion error", exc_info=True)
         raise CustomException(e, sys)
 
 

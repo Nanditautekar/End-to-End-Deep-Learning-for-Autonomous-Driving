@@ -227,3 +227,4 @@ kaggle.json
 # artifacts
 artifacts/
 logs/
+/data

@@ -1,4 +1,4 @@
-numpy
+numpy==1.26.4
 pandas
 matplotlib
 opencv-contrib-python
@@ -8,4 +8,6 @@ keras
 flask
 python-socketio
 eventlet
+scikit-learn
+seaborn
 #-e .
