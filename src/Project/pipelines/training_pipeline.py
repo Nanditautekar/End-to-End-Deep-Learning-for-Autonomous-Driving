@@ -30,8 +30,8 @@ class TrainingPipeline:
             self.project_root, "data", "processed_json", "val.json"
         )
 
-        self.batch_size = 4
-        self.epochs = 3
+        self.batch_size = 16
+        self.epochs = 20
         self.lr = 1e-4
 
         self.ckpt_dir = os.path.join(self.project_root, "artifacts", "checkpoints")
